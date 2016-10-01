@@ -4,7 +4,7 @@ chrome.app.runtime.onLaunched.addListener(function() {
   chrome.app.window.create('window.html', {
     'outerBounds': {
       'width': 400,
-      'height': 350
+      'height': 408
     }
   }, function(createdWindow) {
   	var win = createdWindow.contentWindow;
@@ -15,8 +15,16 @@ chrome.app.runtime.onLaunched.addListener(function() {
 });
 
 function doAlert(data) {
-	//theDoc.getElementById("alert").innerHTML = data;
+	theDoc.getElementById("status").innerHTML = data;
 	console.log(data);
+}
+
+function startSpin() {
+	theDoc.getElementById("gear").className = "fa fa-gear fa-spin";
+}
+
+function stopSpin() {
+	theDoc.getElementById("gear").className = "fa fa-gear";
 }
 
 chrome.runtime.onMessageExternal.addListener(
@@ -24,9 +32,9 @@ chrome.runtime.onMessageExternal.addListener(
         if (request) {
             if (request.message) {
                 if (request.message == "version") {
-                	doAlert("Hi");
                     sendResponse({version: 1.0});
                 } else if (request.message == "devices") {
+                  doAlert("Requested Device List")
                   chrome.serial.getDevices(function(devices) {
                     sendResponse(devices);
                   });
@@ -79,27 +87,34 @@ chrome.runtime.onConnectExternal.addListener(function(port) {
 	console.assert(port.name == "dodo_flash");
 	port.onMessage.addListener(function(msg) {
 		if (msg.fram && msg.path) {
+			startSpin();
+
 			var id = "";
 
 			var onReceive = function(info) {
 				if (info.connectionId == id) {
-					var str = convertArrayBufferToString(info.data)
+					var str = convertArrayBufferToString(info.data);
 					if (str == "R") {
-						doAlert("Got R")
-
 						// Starts off by writing 1
             			writeByte(id, 0, msg, 
             				function(p) {
+            					doAlert("Trasmitting: " + p + "%");
             					port.postMessage({ progress: p});
             				},
             				function() {
+            					stopSpin();
+            					doAlert("Success");
+            					sleep(10000).then(() => {
+            						doAlert("Waiting...");
+            					});
             					chrome.serial.disconnect(id, function() {});
 
             					port.postMessage({ success: true });
 	            				port.disconnect();
             				});
 					} else {
-						doAlert("Read: " + str)
+						doAlert("Error: " + str);
+						stopSpin();
 						port.postMesssage({error: "Invalid Response from Device"});
 						chrome.serial.disconnect(id, function() {});
 					}
@@ -107,7 +122,7 @@ chrome.runtime.onConnectExternal.addListener(function(port) {
 			}
 
 			var onConnect = function(connectionInfo) {
-				doAlert("Connected to Serial");
+				doAlert("Connected");
 				id = connectionInfo.connectionId;
 				chrome.serial.onReceive.addListener(onReceive);
 			}
