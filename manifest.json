@@ -1,7 +1,7 @@
 {
   "name": "Dodo Flash Utility",
   "description": "Dodo Flash is used by the Dodo Playground to flash games over Serial to real Dodo hardware. Visit https://play.dodolabs.io",
-  "version": "0.2",
+  "version": "0.3",
   "manifest_version": 2,
   "app": {
     "background": {
