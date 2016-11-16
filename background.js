@@ -52,35 +52,49 @@ function convertArrayBufferToString(buf){
   return decodeURIComponent(encodedString);
 }
 
+var convertStringToArrayBuffer=function(str) {
+  var buf = new ArrayBuffer(str.length);
+  var bufView = new Uint8Array(buf);
+  for (var i=0; i<str.length; i++) {
+    bufView[i]=str.charCodeAt(i);
+  }
+  return buf;
+};
+
 function sleep(time) {
   return new Promise((resolve) => setTimeout(resolve, time));
 }
 
-function writeByte(id, i, msg, progress, done) {
-	if (i == 8192) {
-		progress(100);
-		done();
-		return;
-	}
-
-	if ((i % 512) == 0) {
-		progress(Math.round((i / 8192) * 100));
-	}
-
-	var buf = new ArrayBuffer(1);
-	var bufView = new Uint8Array(buf);
-
-	bufView[0] = msg.fram[i];
+function writeString(id, str, done) {
+	var buf = convertStringToArrayBuffer(str);
 	chrome.serial.send(id, buf, function() {
 		chrome.serial.flush(id, function() {
+			done();
+		})
+	});
+}
 
-			// Dodo requires a bit of time between each sent byte to deal with it
-			sleep(1).then(() => {
-				writeByte(id, i + 1, msg, progress, done);
-			});
+
+function writeBytes(id, index, count, buffer, done) {
+	var buf = new ArrayBuffer(count);
+	var bufView = new Uint8Array(buf);
+
+	for (var i = 0; i < count; i++) {
+		bufView[i] = buffer[index+i];
+	}
+
+	chrome.serial.send(id, buf, function(sendinfo) {
+		chrome.serial.flush(id, function() {
+			done();
 		});
 	});
 }
+
+var StateEnum = {
+	R: 0,
+	Ack1: 1,
+	Ack2: 2,
+};
 
 chrome.runtime.onConnectExternal.addListener(function(port) {
 	doAlert(port.name);
@@ -90,33 +104,65 @@ chrome.runtime.onConnectExternal.addListener(function(port) {
 			startSpin();
 
 			var id = "";
+			var state = StateEnum.R;
 
 			var onReceive = function(info) {
 				if (info.connectionId == id) {
 					var str = convertArrayBufferToString(info.data);
-					if (str == "R") {
-						// Starts off by writing 1
-            			writeByte(id, 0, msg, 
-            				function(p) {
-            					doAlert("Trasmitting: " + p + "%");
-            					port.postMessage({ progress: p});
-            				},
-            				function() {
-            					stopSpin();
-            					doAlert("Success");
-            					sleep(10000).then(() => {
-            						doAlert("Waiting...");
-            					});
-            					chrome.serial.disconnect(id, function() {});
+					
+					if (state == StateEnum.R) {
+						if (str == "R") {
+							state = StateEnum.Ack1;
+							writeString(id, "G", function() { });
+						} else {
+							doAlert("Error: " + str);
+							stopSpin();
+							port.postMesssage({error: "Invalid Response from Device"});
+							chrome.serial.disconnect(id, function() {});
+						}
+					} else if (state == StateEnum.Ack1) {
+						if (str == "A") {
+							function next(i) {
+								if (i % 512 == 0) {
+									var p = Math.round((i / 8192) * 100);
+	        						port.postMessage({ progress: p});
+        						}
 
-            					port.postMessage({ success: true });
-	            				port.disconnect();
-            				});
-					} else {
-						doAlert("Error: " + str);
-						stopSpin();
-						port.postMesssage({error: "Invalid Response from Device"});
-						chrome.serial.disconnect(id, function() {});
+								if (i == 8192)
+								{
+									state = StateEnum.Ack2;
+									return;
+								}
+
+								// Can only write 1 byte at a time
+								writeBytes(id, i, 1, msg.fram, function() {
+									next(i + 1);
+								});
+							}
+							next(0);
+						} else {
+							doAlert("Error: " + str);
+							stopSpin();
+							port.postMesssage({error: "Invalid Response from Device"});
+							chrome.serial.disconnect(id, function() {});
+						}
+					} else if (state == StateEnum.Ack2) {
+						if (str == "A") {
+							stopSpin();
+        					doAlert("Success");
+        					sleep(10000).then(() => {
+        						doAlert("Waiting...");
+        					});
+        					chrome.serial.disconnect(id, function() {});
+
+        					port.postMessage({ success: true });
+            				port.disconnect();
+						} else {
+							doAlert("Error: " + str);
+							stopSpin();
+							port.postMesssage({error: "Invalid Response from Device"});
+							chrome.serial.disconnect(id, function() {});
+						}
 					}
 				}
 			}
@@ -125,9 +171,12 @@ chrome.runtime.onConnectExternal.addListener(function(port) {
 				doAlert("Connected");
 				id = connectionInfo.connectionId;
 				chrome.serial.onReceive.addListener(onReceive);
+				chrome.serial.onReceiveError.addListener(function(info) {
+					doAlert("Receive Error: " + info.error);
+				});
 			}
 
-			chrome.serial.connect(msg.path, {bitrate: 19200}, onConnect);
+			chrome.serial.connect(msg.path, {bitrate: 9600}, onConnect);
 		}
 	});
 });
