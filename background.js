@@ -91,7 +91,6 @@ function writeBytes(id, index, count, buffer, done) {
 }
 
 var StateEnum = {
-	R: 0,
 	Ack1: 1,
 	Ack2: 2,
 };
@@ -110,17 +109,7 @@ chrome.runtime.onConnectExternal.addListener(function(port) {
 				if (info.connectionId == id) {
 					var str = convertArrayBufferToString(info.data);
 					
-					if (state == StateEnum.R) {
-						if (str == "R") {
-							state = StateEnum.Ack1;
-							writeString(id, "G", function() { });
-						} else {
-							doAlert("Error: " + str);
-							stopSpin();
-							port.postMesssage({error: "Invalid Response from Device"});
-							chrome.serial.disconnect(id, function() {});
-						}
-					} else if (state == StateEnum.Ack1) {
+					if (state == StateEnum.Ack1) {
 						if (str == "A") {
 							function next(i) {
 								if (i % 512 == 0) {
@@ -174,6 +163,9 @@ chrome.runtime.onConnectExternal.addListener(function(port) {
 				chrome.serial.onReceiveError.addListener(function(info) {
 					doAlert("Receive Error: " + info.error);
 				});
+
+				state = StateEnum.Ack1;
+				writeString(id, "G", function() { });
 			}
 
 			chrome.serial.connect(msg.path, {bitrate: 9600}, onConnect);
